@@ -1,4 +1,4 @@
-# GitHunter 🔍
+# GitHunter
 
 > AI-powered GitHub profile analyzer for recruiters and developers
 
