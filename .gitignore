@@ -32,3 +32,11 @@ testdata.js
 
 # Misc
 .cache/
+
+# Credentials — never commit
+gen-lang-client-*.json
+service-account*.json
+credentials*.json
+*-key.json
+.env
+.env.local
