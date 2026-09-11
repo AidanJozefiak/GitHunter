@@ -7,6 +7,7 @@ const REPORT_CACHE_TTL = parseInt(process.env.REPORT_CACHE_TTL || "3600", 10);
 const PORT = parseInt(process.env.PORT || "5000", 10);
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN || "";
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-flash-latest";
 /** Path to service account JSON file, or leave empty if using GOOGLE_SERVICE_ACCOUNT_JSON. */
 const GOOGLE_APPLICATION_CREDENTIALS =
   process.env.GOOGLE_APPLICATION_CREDENTIALS || process.env.GOOGLE_SERVICE_ACCOUNT_KEY || "";

@@ -2,6 +2,7 @@ const express = require("express");
 const { analysisQueue } = require("../utils/queue");
 const { getReportByJobId, getReportByUsername, getJobStatus, setJobStatus } = require("../utils/cache");
 const { createReportPdf, fillReportPdf } = require("../services/pdfService");
+const { analyzeLimiter, dailyCap } = require("../middleware/limits");
 
 const router = express.Router();
 
@@ -9,7 +10,7 @@ const router = express.Router();
  * GET /api/analyze?username=torvalds
  * Start analysis from browser; redirects to status page for that job.
  */
-router.get("/analyze", async (req, res) => {
+router.get("/analyze", analyzeLimiter, dailyCap, async (req, res) => {
   const username = (req.query?.username || "").trim();
   if (!username) {
     return res.status(400).send("Add ?username=... to the URL, e.g. /api/analyze?username=torvalds");
@@ -32,7 +33,7 @@ router.get("/analyze", async (req, res) => {
  * Body: { username, view?: "recruiter" | "developer" }
  * Returns { jobId }. Frontend polls GET /api/status/:jobId then GET /api/report/:jobId
  */
-router.post("/analyze", async (req, res) => {
+router.post("/analyze", analyzeLimiter, dailyCap, async (req, res) => {
   const username = (req.body?.username || "").trim();
   if (!username) {
     return res.status(400).json({ error: "username is required" });

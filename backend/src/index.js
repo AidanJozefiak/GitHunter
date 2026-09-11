@@ -12,11 +12,21 @@ const app = express();
 
 app.use(express.json());
 app.use(cors({
-  origin: "*",
+  origin: (origin, cb) => {
+    // no origin = curl, Postman, same-origin requests
+    if (!origin || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+    return cb(new Error("Not allowed by CORS"));
+  },
   methods: ["GET", "POST", "OPTIONS"],
-  credentials: true,
 }));
 
+app.get("/api/health", (req, res) => {
+  const { isRedisAvailable } = require("./utils/cache");
+  const { isSlidesConfigured } = require("./config/env");
+  res.json({ ok: true, redis: isRedisAvailable(), slides: isSlidesConfigured() });
+});
+
+app.set("trust proxy", 1);
 mountRoutes(app);
 
 module.exports = app;

@@ -2,9 +2,7 @@
  * AI scoring and recommendations via Gemini 3 Flash (paid).
  * Output sections as variables: scores, strengthsWeaknesses, technicalHighlights, improvementSuggestions, hiringRecommendation.
  */
-const { GEMINI_API_KEY } = require("../config/env");
-
-const GEMINI_MODEL = "gemini-3-flash-preview";
+const { GEMINI_API_KEY, GEMINI_MODEL } = require("../config/env");
 
 /** Chars of code per file in prompt (~20–25 lines). apiSource already caps at 150 lines/file. */
 const PREVIEW_CHAR_LIMIT = 800;
