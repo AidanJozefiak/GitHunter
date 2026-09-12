@@ -7,7 +7,11 @@ let firstSearch = true;
 /** Set when a report is rendered; used by the Download PDF button. */
 let lastReportUsername = null;
 
-const API_BASE = "http://localhost:5000";
+const API_BASE =
+  window.GITHUNTER_API_BASE ||
+  (location.hostname === "localhost" || location.hostname === "127.0.0.1"
+    ? "http://localhost:5000"
+    : "https://githunter.onrender.com");
 const POLL_INTERVAL_MS = 2000;
 
 /** IDs for the fake loading animation; cleared when analysis completes or fails. */
@@ -56,29 +60,49 @@ document.addEventListener("DOMContentLoaded", () => {
     if (createSlidesBtn) createSlidesBtn.addEventListener("click", createSlidesPresentation);
 });
 
-/** Load and render report when opening ReportView with ?username= (e.g. from enterprise portal). */
+/** Load and render a report. Tries Supabase first (instant, works when backend is asleep), then the API. */
 async function loadReportByUsernameFromUrl(username) {
+    const setMsg = (text) => {
+        const search = document.getElementById("search");
+        const subtitle = search && search.querySelector("h2");
+        if (subtitle) subtitle.textContent = text;
+    };
+
+    // 1. Demo reports come straight from Supabase — no backend, no cold start.
+    if (window.SUPA) {
+        try {
+            const { data } = await window.SUPA
+                .from("archived_reports")
+                .select("report")
+                .eq("username", username)
+                .eq("is_demo", true)
+                .maybeSingle();
+            if (data && data.report) {
+                renderReport(data.report);
+                return;
+            }
+        } catch (e) {
+            console.warn("Supabase lookup failed, falling back to API", e);
+        }
+    }
+
+    // 2. Anything else (freshly analyzed profiles) goes through the backend.
     try {
         const res = await fetch(`${API_BASE}/api/report/latest/${encodeURIComponent(username)}`);
         if (res.ok) {
-            const data = await res.json();
-            renderReport(data);
+            renderReport(await res.json());
         } else {
             const err = await res.json().catch(() => ({}));
-            const search = document.getElementById("search");
-            if (search) {
-                const subtitle = search.querySelector("h2");
-                if (subtitle) subtitle.textContent = err.error || "Report not found.";
-            }
+            setMsg(err.error || "Report not found.");
         }
     } catch (e) {
         console.error(e);
-        const search = document.getElementById("search");
-        if (search && search.querySelector("h2")) search.querySelector("h2").textContent = "Failed to load report.";
+        setMsg("Failed to load report.");
     }
 }
 
-/** Enterprise portal: load list, render cards, ensure + navigate on click. */
+
+/** Gallery of pre-analyzed reports. Reads Supabase directly so it works even when the backend is asleep. */
 async function initEnterprisePortal(container) {
     const loadingEl = document.getElementById("enterprise-loading");
     const emptyEl = document.getElementById("enterprise-empty");
@@ -87,59 +111,80 @@ async function initEnterprisePortal(container) {
     if (emptyEl) emptyEl.classList.add("hidden");
     container.innerHTML = "";
 
-    try {
-        const res = await fetch(`${API_BASE}/api/enterprise/list`);
-        const list = res.ok ? await res.json() : [];
-        if (loadingEl) loadingEl.classList.add("hidden");
-        if (!list || list.length === 0) {
-            if (emptyEl) emptyEl.classList.remove("hidden");
-            return;
-        }
-        if (emptyEl) emptyEl.classList.add("hidden");
-        list.forEach((entry) => {
-            const card = document.createElement("div");
-            card.className = "enterprise-card";
-            card.dataset.username = entry.username;
-            const img = document.createElement("img");
-            img.className = "enterprise-card-avatar";
-            img.src = entry.avatar_url || "res/logo.png";
-            img.alt = entry.username;
-            img.loading = "lazy";
-            const nameEl = document.createElement("span");
-            nameEl.className = "enterprise-card-username";
-            nameEl.textContent = entry.username;
-            const scoreEl = document.createElement("span");
-            scoreEl.className = "enterprise-card-score";
-            scoreEl.textContent = entry.score != null ? String(entry.score) : "—";
-            card.appendChild(img);
-            card.appendChild(nameEl);
-            card.appendChild(scoreEl);
-            card.addEventListener("click", async () => {
-                card.classList.add("enterprise-card-loading");
-                try {
-                    const ensureRes = await fetch(`${API_BASE}/api/enterprise/ensure/${encodeURIComponent(entry.username)}`);
-                    if (ensureRes.ok) {
-                        window.location.href = `ReportView.html?username=${encodeURIComponent(entry.username)}`;
-                    } else {
-                        const err = await ensureRes.json().catch(() => ({}));
-                        alert(err.error || "Report not found.");
-                    }
-                } catch (e) {
-                    alert("Failed to load report.");
-                } finally {
-                    card.classList.remove("enterprise-card-loading");
-                }
+    let list = [];
+
+    // 1. Supabase first.
+    if (window.SUPA) {
+        try {
+            const { data, error } = await window.SUPA
+                .from("archived_reports")
+                .select("username, report")
+                .eq("is_demo", true);
+            if (error) throw error;
+            list = (data || []).map((row) => {
+                const r = row.report || {};
+                return {
+                    username: row.username,
+                    score: r.scores?.overallScore ?? null,
+                    avatar_url: r.report?.user?.avatar_url ?? "",
+                };
             });
-            container.appendChild(card);
-        });
-    } catch (e) {
-        console.error(e);
-        if (loadingEl) loadingEl.classList.add("hidden");
-        if (emptyEl) {
-            emptyEl.textContent = "Failed to load list.";
-            emptyEl.classList.remove("hidden");
+        } catch (e) {
+            console.warn("Supabase gallery failed, falling back to API", e);
         }
     }
+
+    // 2. Fall back to the backend if Supabase gave us nothing.
+    if (list.length === 0) {
+        try {
+            const res = await fetch(`${API_BASE}/api/enterprise/list`);
+            if (res.ok) list = await res.json();
+        } catch (e) {
+            console.error(e);
+        }
+    }
+
+    if (loadingEl) loadingEl.classList.add("hidden");
+
+    if (!list.length) {
+        if (emptyEl) {
+            emptyEl.textContent = "No archived reports yet.";
+            emptyEl.classList.remove("hidden");
+        }
+        return;
+    }
+    if (emptyEl) emptyEl.classList.add("hidden");
+
+    list.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+
+    list.forEach((entry) => {
+        const card = document.createElement("div");
+        card.className = "enterprise-card";
+        card.dataset.username = entry.username;
+
+        const img = document.createElement("img");
+        img.className = "enterprise-card-avatar";
+        img.src = entry.avatar_url || "res/logo.png";
+        img.alt = entry.username;
+        img.loading = "lazy";
+
+        const nameEl = document.createElement("span");
+        nameEl.className = "enterprise-card-username";
+        nameEl.textContent = entry.username;
+
+        const scoreEl = document.createElement("span");
+        scoreEl.className = "enterprise-card-score";
+        scoreEl.textContent = entry.score != null ? String(entry.score) : "—";
+
+        card.append(img, nameEl, scoreEl);
+
+        // No /ensure call needed — the report page reads Supabase itself.
+        card.addEventListener("click", () => {
+            window.location.href = `index.html?username=${encodeURIComponent(entry.username)}`;
+        });
+
+        container.appendChild(card);
+    });
 }
 
 function clearFakeLoadingIntervals() {
@@ -196,7 +241,6 @@ function showAnalyzingState(show, progress = 0, text = "Running AI analysis…")
 
 /**
  * Start the fake progress bar and rotating funny messages. Call clearFakeLoadingIntervals (or showAnalyzingState(false)) to stop.
- * @returns {{ setProgress: (n: number) => void, setMessage: (s: string) => void }}
  */
 function startFakeLoadingBar() {
     clearFakeLoadingIntervals();
