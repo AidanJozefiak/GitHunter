@@ -4,7 +4,7 @@ const { getClient, isRedisAvailable } = require("../utils/cache");
 /** Max 3 analyses per IP per hour. */
 const analyzeLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
-  max: 3,
+  max: parseInt(process.env.ANALYZE_RATE_LIMIT || "3", 10),
   standardHeaders: true,
   legacyHeaders: false,
   message: {

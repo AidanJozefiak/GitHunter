@@ -11,6 +11,10 @@ const { mountRoutes } = require("./routes");
 const app = express();
 
 app.use(express.json());
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || "http://localhost:3000,http://127.0.0.1:5500")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
 app.use(cors({
   origin: (origin, cb) => {
     // no origin = curl, Postman, same-origin requests
