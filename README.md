@@ -139,8 +139,10 @@ Or point `REDIS_URL` at a hosted Redis instance. The app runs without Redis but 
 All configuration lives in `backend/.env`. Copy `backend/.env.example` and fill in the values:
 
 ```env
-# GitHub (optional — increases rate limit from 60 to 5,000 req/hour)
-# Create at: https://github.com/settings/tokens
+# GitHub (REQUIRED) — one analysis makes 300-400 API calls.
+# Unauthenticated (60/hour) cannot complete a single run; authenticated is 5,000/hour.
+# Create a fine-grained token at https://github.com/settings/personal-access-tokens
+# No scopes and no repository access are needed, it only reads public data.
 GITHUB_TOKEN=your_token_here
 
 # Redis (required for job queue and caching)
@@ -148,6 +150,16 @@ REDIS_URL=redis://localhost:6379
 
 # Cache TTL in seconds (default: 1 hour)
 REPORT_CACHE_TTL=3600
+
+# Gemini model id. Avoid -preview models in production; they get retired without notice.
+GEMINI_MODEL=gemini-flash-latest
+
+# Comma-separated list of origins allowed to call this API (CORS).
+ALLOWED_ORIGINS=https://git-hunter-nu.vercel.app
+
+# Abuse and cost guards on POST /api/analyze
+ANALYZE_RATE_LIMIT=3          # per IP per hour
+DAILY_ANALYSIS_CAP=40         # global, all users, per day
 
 # Google Gemini API key (required for AI analysis)
 # Get one at: https://aistudio.google.com/apikey
@@ -169,9 +181,10 @@ GOOGLE_OAUTH_REFRESH_TOKEN=
 # How long (ms) before deleting the server's copy of the presentation (default: 5 min)
 # SLIDES_CLEANUP_DELAY_MS=300000
 
-# --- Supabase (optional — for Enterprise portal) ---
-# Create a project at https://supabase.com
-# See backend/docs/SUPABASE_SETUP.md for table schema
+# --- Supabase (REQUIRED for the archive + demo gallery) ---
+# Reports are archived here permanently; the frontend reads demo reports
+# directly from Supabase so the gallery works even when the backend is asleep.
+# See backend/docs/SUPABASE_SETUP.md for the table schema and RLS policy.
 SUPABASE_URL=https://<your-project-ref>.supabase.co
 SUPABASE_SECRET_KEY=sb_secret_...
 ```
@@ -192,8 +205,6 @@ The server defaults to port **5000**. Override with `PORT=3000 npm start`.
 
 ### Open the frontend
 
-Open `frontend/ReportView.html` directly in your browser, or serve the `frontend/` directory with any static file server:
-
 ```bash
 # Using Python's built-in server
 cd frontend
@@ -201,7 +212,7 @@ python3 -m http.server 8080
 # Visit http://localhost:8080/ReportView.html
 ```
 
-> **Note:** The frontend's `API_BASE` is hardcoded to `http://localhost:5000` in `script.js`. Update this if your backend runs on a different host or port.
+> **Note:** `API_BASE` in `script.js` auto-detects the environment — `http://localhost:5000` when served from localhost, the production backend otherwise. Override it by setting `window.GITHUNTER_API_BASE` before `script.js` loads.
 
 ---
 
@@ -303,104 +314,78 @@ Ensures a report is in Redis (loads from Supabase if missing).
 
 ## Hosting Guide
 
-### Option 1 — Local development (quickest)
+GitHunter runs on free tiers across four services. This is the live deployment.
 
-Follow the [Installation](#installation) steps above. This is best for testing and personal use.
+| Component | Service | Notes |
+|---|---|---|
+| Frontend | Vercel | Static, no build step, global CDN |
+| Backend | Render Web Service | Free tier; sleeps after ~15 min idle |
+| Cache + job queue | Render Key Value | Free tier, 25MB, no disk persistence |
+| Report archive | Supabase (Postgres) | Free tier; permanent storage |
 
----
+### Why the demo doesn't touch the backend
 
-### Option 2 — Railway (recommended for easy cloud hosting)
+An analysis makes 300–400 GitHub API calls and takes 2–4 minutes, and a free-tier
+backend takes ~50 seconds to wake from sleep. Asking a first-time visitor to sit
+through that would fail.
 
-[Railway](https://railway.app) can host both the Node.js backend and a Redis instance for free (within usage limits).
+Instead, a set of pre-analyzed profiles is flagged `is_demo = true` in Supabase, and
+the frontend reads those rows **directly from Supabase** using the publishable key,
+constrained by a row-level security policy to demo rows only. The gallery loads in
+under a second and works whether or not the backend is awake. Live analysis of a new
+username is the only path that touches the API.
 
-1. Push your code to a GitHub repository.
-2. Create a new Railway project → **Deploy from GitHub repo**.
-3. Add a **Redis** plugin from the Railway dashboard — Railway will automatically inject `REDIS_URL` into your environment.
-4. Add environment variables (all the values from your `.env`) under **Variables** in the Railway service settings.
-5. Set the **Start Command** to `node index.js` and the **Root Directory** to `backend/`.
-6. For the frontend, deploy the `frontend/` folder to a static host (see below) and update `API_BASE` in `script.js` to point to your Railway backend URL.
+### Backend — Render
 
----
+1. **New → Key Value** (free). Copy the **Internal** connection URL.
+2. **New → Web Service**, connect the repo:
+   - Root Directory: `backend`
+   - Build: `npm install`
+   - Start: `node index.js`
+3. Add every variable from [Configuration](#configuration). Leave all `GOOGLE_*`
+   unset to disable Slides export.
+4. Verify: `curl https://<your-backend>.onrender.com/api/health` → `{"ok":true,"redis":true,"slides":false}`
 
-### Option 3 — Render
+`redis: true` is the one that matters — Bull's job queue hard-requires Redis, so
+`POST /api/analyze` fails without it (the cache alone degrades gracefully).
 
-1. Create a **Web Service** on [Render](https://render.com), connect your repo, and set:
-   - **Root Directory:** `backend`
-   - **Build Command:** `npm install`
-   - **Start Command:** `node index.js`
-2. Add a **Redis** instance from Render's dashboard and copy the connection string into the `REDIS_URL` environment variable.
-3. Add all other environment variables in the Render dashboard under **Environment**.
-4. Deploy the `frontend/` folder to **Render Static Site** or any static host, and update `API_BASE` in `script.js`.
+### Database — Supabase
 
----
+Create a project, then run the schema and RLS policy in
+[`backend/docs/SUPABASE_SETUP.md`](backend/docs/SUPABASE_SETUP.md).
 
-### Option 4 — VPS / DigitalOcean / EC2
+Two keys, and they are not interchangeable:
 
-1. SSH into your server and install Node.js 18+ and Redis.
-2. Clone the repo and run `npm install` in `backend/`.
-3. Create `/etc/systemd/system/githunter.service`:
+- **Secret key** (`sb_secret_...`) — backend only. Bypasses RLS.
+- **Publishable key** — safe in frontend code. Restricted by RLS to demo rows.
 
-```ini
-[Unit]
-Description=GitHunter Backend
+### Frontend — Vercel
 
-[Service]
-WorkingDirectory=/path/to/GitHunter/backend
-ExecStart=/usr/bin/node index.js
-Restart=always
-EnvironmentFile=/path/to/GitHunter/backend/.env
+Import the repo, set **Root Directory** to `frontend`, framework preset **Other**,
+no build command. Then set `ALLOWED_ORIGINS` on the backend to the Vercel URL or
+every browser request fails CORS.
 
-[Install]
-WantedBy=multi-user.target
+### Seeding the demo gallery
+
+Raise `ANALYZE_RATE_LIMIT` temporarily, run an analysis per profile (one at a time —
+each takes 2–4 minutes), then flag them:
+
+```sql
+update archived_reports set is_demo = true where username in ('torvalds', ...);
 ```
 
-4. Enable and start the service:
+Set `ANALYZE_RATE_LIMIT` back to 3 afterwards.
 
-```bash
-sudo systemctl enable githunter
-sudo systemctl start githunter
-```
+### Keeping it alive
 
-5. Use **Nginx** as a reverse proxy to expose port 5000 on port 80/443, and serve the `frontend/` directory as a static site.
+Two free-tier timers will silently kill the deployment:
 
----
+- Render spins the backend down after ~15 minutes idle
+- **Supabase pauses a free project after 7 days of low activity**
 
-### Hosting the frontend
+`.github/workflows/keepalive.yml` pings both during waking hours. The Supabase pause
+is the dangerous one — it happens with no warning, and the demo gallery depends on it.
 
-The frontend is plain HTML/CSS/JS — no build step required. Options:
-
-| Host | Steps |
-|---|---|
-| **GitHub Pages** | Push `frontend/` to a `gh-pages` branch or configure Pages to serve from `frontend/` |
-| **Netlify** | Drag and drop the `frontend/` folder at netlify.com/drop |
-| **Vercel** | `vercel --cwd frontend` |
-| **Nginx / Apache** | Copy `frontend/` to your web root |
-
-**Important:** After deploying the backend, update `API_BASE` at the top of `frontend/script.js` to your backend's public URL:
-
-```js
-const API_BASE = "https://your-backend.railway.app"; // ← update this
-```
-
----
-
-### Optional: Supabase setup (Enterprise portal)
-
-1. Create a project at [supabase.com](https://supabase.com).
-2. Follow `backend/docs/SUPABASE_SETUP.md` to create the `archived_reports` table.
-3. Add `SUPABASE_URL` and `SUPABASE_SECRET_KEY` to your environment.
-
-### Optional: Google Slides setup
-
-Follow `backend/docs/GOOGLE_SLIDES_OAUTH_SETUP.md` to obtain OAuth credentials, then set:
-
-```env
-GOOGLE_OAUTH_CLIENT_ID=...
-GOOGLE_OAUTH_CLIENT_SECRET=...
-GOOGLE_OAUTH_REFRESH_TOKEN=...
-```
-
----
 
 ## Testing
 
@@ -471,7 +456,8 @@ GitHunter/
 │       ├── v1/                    # Unit + integration tests
 │       └── v2/                    # AI analysis, Redis, Slides, route tests
 └── frontend/
-    ├── ReportView.html            # Main search + report UI
+    ├── index.html                 # Main search + report UI (entry point)
+    ├── ReportView.html            # Redirect stub (legacy links)
     ├── EnterpriseView.html        # Enterprise candidate portal
     ├── script.js                  # All frontend logic (search, polling, rendering)
     ├── interface.css              # Styles
@@ -479,6 +465,10 @@ GitHunter/
 ```
 
 ---
+
+## Credits
+
+Built at St. John's Hacks 2026 by Richard Perez, Justin Cracchiolo, Brandon Singh, and Aidan Jozefiak.
 
 ## License
 
