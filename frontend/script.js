@@ -47,6 +47,9 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
     }
 
+    const demoContainer = document.getElementById("demo-cards-container");
+    if (demoContainer) initEnterprisePortal(demoContainer);
+
     const params = new URLSearchParams(window.location.search);
     const usernameFromUrl = params.get("username");
     if (usernameFromUrl && document.getElementById("stats")) {
@@ -104,8 +107,8 @@ async function loadReportByUsernameFromUrl(username) {
 
 /** Gallery of pre-analyzed reports. Reads Supabase directly so it works even when the backend is asleep. */
 async function initEnterprisePortal(container) {
-    const loadingEl = document.getElementById("enterprise-loading");
-    const emptyEl = document.getElementById("enterprise-empty");
+    const loadingEl = document.getElementById("enterprise-loading") || document.getElementById("demo-loading");
+    const emptyEl = document.getElementById("enterprise-empty") || document.getElementById("demo-empty");
 
     if (loadingEl) loadingEl.classList.remove("hidden");
     if (emptyEl) emptyEl.classList.add("hidden");

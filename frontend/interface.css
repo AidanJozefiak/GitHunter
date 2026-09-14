@@ -954,7 +954,8 @@ h2 {
 }
 
 /* Enterprise portal cards */
-#enterprise-cards-container {
+#enterprise-cards-container,
+#demo-cards-container {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
     gap: 20px;
@@ -963,6 +964,7 @@ h2 {
     padding: 20px;
     box-sizing: border-box;
 }
+
 
 .enterprise-card {
     display: flex;
@@ -1016,4 +1018,37 @@ h2 {
 #enterprise-empty.hidden,
 #enterprise-loading.hidden {
     display: none;
+}
+
+/* Landing page demo gallery */
+#demo-section {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+    margin-top: 48px;
+}
+
+#demo-heading {
+    font-size: 18px;
+    font-weight: 600;
+    color: #ddd;
+    margin: 0 0 4px;
+}
+
+#demo-subheading {
+    font-size: 14px;
+    color: #999;
+    margin: 0 0 8px;
+}
+
+#demo-loading,
+#demo-empty {
+    color: #999;
+    font-size: 14px;
+}
+
+/* The landing page is taller now — pull the top padding in */
+.initial-state {
+    padding-top: 120px;
 }
