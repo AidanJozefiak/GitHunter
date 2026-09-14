@@ -2,6 +2,8 @@
 
 > AI-powered GitHub profile analyzer for recruiters and developers
 
+**[▶ Live demo](https://git-hunter-nu.vercel.app/)** 
+
 GitHunter takes any GitHub username and generates a comprehensive hiring-grade report, with AI scoring, code quality analysis, strengths/weaknesses, technical highlights, and exportable PDF or Google Slides presentations.
 
 ---
