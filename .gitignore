@@ -40,3 +40,7 @@ credentials*.json
 *-key.json
 .env
 .env.local
+
+
+test_ai_input.json
+.cursor/
